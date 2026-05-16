@@ -1,6 +1,6 @@
 import { ANIME } from '@consumet/extensions';
 
-const hianime = new ANIME.Zoro(); // Zoro is the current working Hianime provider in consumet
+const hianime = new ANIME.Hianime();
 const animepahe = new ANIME.AnimePahe();
 
 export async function fetchEpisodes(animeTitle: string) {
