@@ -39,9 +39,24 @@ export default async function WatchPage({
   let magnetUrl = '';
   if (bestGroup && currentEpNum) {
     const paddedEp = currentEpNum.toString().padStart(2, '0');
-    const nyaaResults = await searchNyaa(`${bestGroup} ${title} ${paddedEp}`);
-    if (nyaaResults.length > 0) {
-      magnetUrl = nyaaResults[0].magnet;
+    // Broaden search: "Group Title Episode" and "Group Title Ep"
+    const queries = [
+      `${bestGroup} ${title} ${paddedEp}`,
+      `${bestGroup} ${title} ${currentEpNum}`
+    ];
+    
+    for (const query of queries) {
+      const nyaaResults = await searchNyaa(query);
+      if (nyaaResults.length > 0) {
+        // Find best match in results (exact episode match)
+        const bestMatch = nyaaResults.find(r => 
+          r.title.includes(paddedEp) || r.title.includes(` ${currentEpNum} `) || r.title.endsWith(` ${currentEpNum}`)
+        );
+        if (bestMatch) {
+          magnetUrl = bestMatch.magnet;
+          break;
+        }
+      }
     }
   }
 
@@ -49,7 +64,7 @@ export default async function WatchPage({
   let streamUrl = '';
   if (!magnetUrl && currentEpisode) {
     try {
-      const data: any = await fetchStreamLinks(currentEpisode.id);
+      const data: any = await fetchStreamLinks(currentEpisode.id, currentEpisode.provider);
       streamUrl = data?.sources?.find((s: any) => s.quality === 'default' || s.quality === 'auto')?.url || data?.sources?.[0]?.url;
     } catch (err) {
       console.error("Stream fetch failed:", err);

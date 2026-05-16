@@ -1,23 +1,50 @@
 import { ANIME } from '@consumet/extensions';
 
 const hianime = new ANIME.Hianime();
+const gogoanime = new ANIME.Gogoanime();
 const animepahe = new ANIME.AnimePahe();
+
+export interface Episode {
+  id: string;
+  number: number;
+  title?: string;
+  provider: 'hianime' | 'gogoanime' | 'animepahe';
+}
 
 export async function fetchEpisodes(animeTitle: string) {
   try {
-    // Try Hianime first
-    let results = await hianime.search(animeTitle);
-    if (results.results.length > 0) {
-      const anime = results.results[0];
-      return await hianime.fetchAnimeInfo(anime.id);
-    }
+    // 1. Try Hianime
+    try {
+      const results = await hianime.search(animeTitle);
+      if (results.results.length > 0) {
+        const info = await hianime.fetchAnimeInfo(results.results[0].id);
+        return {
+          episodes: info.episodes.map((ep: any) => ({ ...ep, provider: 'hianime' })),
+        };
+      }
+    } catch (e) {}
 
-    // Fallback to AnimePahe
-    results = await animepahe.search(animeTitle);
-    if (results.results.length > 0) {
-      const anime = results.results[0];
-      return await animepahe.fetchAnimeInfo(anime.id);
-    }
+    // 2. Try Gogoanime
+    try {
+      const results = await gogoanime.search(animeTitle);
+      if (results.results.length > 0) {
+        const info = await gogoanime.fetchAnimeInfo(results.results[0].id);
+        return {
+          episodes: info.episodes.map((ep: any) => ({ ...ep, provider: 'gogoanime' })),
+        };
+      }
+    } catch (e) {}
+
+    // 3. Try AnimePahe
+    try {
+      const results = await animepahe.search(animeTitle);
+      if (results.results.length > 0) {
+        const info = await animepahe.fetchAnimeInfo(results.results[0].id);
+        return {
+          episodes: info.episodes.map((ep: any) => ({ ...ep, provider: 'animepahe' })),
+        };
+      }
+    } catch (e) {}
 
     return null;
   } catch (error) {
@@ -26,24 +53,21 @@ export async function fetchEpisodes(animeTitle: string) {
   }
 }
 
-export async function fetchStreamLinks(episodeId: string) {
+export async function fetchStreamLinks(episodeId: string, provider: string) {
   try {
-    // Try Hianime first
-    try {
-      const links = await hianime.fetchEpisodeSources(episodeId);
-      if (links && links.sources && links.sources.length > 0) return links;
-    } catch (e) {
-      // ignore and try next
+    if (provider === 'hianime') {
+      return await hianime.fetchEpisodeSources(episodeId);
+    } else if (provider === 'gogoanime') {
+      return await gogoanime.fetchEpisodeSources(episodeId);
+    } else if (provider === 'animepahe') {
+      return await animepahe.fetchEpisodeSources(episodeId);
     }
-
-    try {
-      const links = await animepahe.fetchEpisodeSources(episodeId);
-      return links;
-    } catch (e) {
-      return null;
-    }
+    return null;
   } catch (error) {
-    console.error('Error fetching stream links:', error);
+    console.error(`Error fetching stream links for ${provider}:`, error);
+    // Absolute fallback: try all if provider-specific fails
+    try { return await gogoanime.fetchEpisodeSources(episodeId); } catch(e) {}
+    try { return await hianime.fetchEpisodeSources(episodeId); } catch(e) {}
     return null;
   }
 }
