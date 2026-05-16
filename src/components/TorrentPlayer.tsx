@@ -14,20 +14,21 @@ export default function TorrentPlayer({ magnet }: TorrentPlayerProps) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!magnet) return;
+    if (!magnet || typeof window === 'undefined') return;
 
     let client: any;
 
     const initWebTorrent = async () => {
       try {
-        // Dynamically import WebTorrent only on the client side
-        const WebTorrent = (await import('webtorrent')).default;
+        // Absolute isolation: only import inside useEffect
+        const WebTorrentModule = await import('webtorrent');
+        const WebTorrent = WebTorrentModule.default;
+        
         client = new WebTorrent();
 
         client.add(magnet, (torrent: any) => {
           setStatus('metadata');
           
-          // Find the video file
           const file = torrent.files.find((f: any) => 
             f.name.endsWith('.mp4') || 
             f.name.endsWith('.mkv') || 
@@ -40,8 +41,7 @@ export default function TorrentPlayer({ magnet }: TorrentPlayerProps) {
               controls: true,
             }, (err: any) => {
               if (err) {
-                console.error('Render error:', err);
-                setError('This file format might not be supported by your browser (e.g. MKV with HEVC).');
+                setError('This format may require a local player like VLC.');
                 setStatus('error');
               } else {
                 setStatus('ready');
@@ -55,13 +55,11 @@ export default function TorrentPlayer({ magnet }: TorrentPlayerProps) {
         });
 
         client.on('error', (err: any) => {
-          console.error('Client error:', err);
           setError(err.message);
           setStatus('error');
         });
       } catch (err: any) {
-        console.error('WebTorrent init error:', err);
-        setError('Failed to initialize torrent engine.');
+        setError('Torrent engine failed to start.');
         setStatus('error');
       }
     };
@@ -69,7 +67,9 @@ export default function TorrentPlayer({ magnet }: TorrentPlayerProps) {
     initWebTorrent();
 
     return () => {
-      if (client) client.destroy();
+      if (client) {
+        try { client.destroy(); } catch (e) {}
+      }
     };
   }, [magnet]);
 
@@ -79,13 +79,7 @@ export default function TorrentPlayer({ magnet }: TorrentPlayerProps) {
         <Info className="text-red-500 mb-4" size={48} />
         <h2 className="text-xl font-bold text-white mb-2">PLAYBACK ERROR</h2>
         <p className="text-gray-400 max-w-md">{error}</p>
-        <p className="mt-4 text-xs text-gray-500">Try opening the magnet link in a local player like VLC or MPV.</p>
-        <a 
-          href={magnet}
-          className="mt-6 bg-primary text-black px-6 py-2 rounded-xl font-bold hover:scale-105 transition-all"
-        >
-          OPEN MAGNET LINK
-        </a>
+        <a href={magnet} className="mt-6 bg-primary text-black px-6 py-2 rounded-xl font-bold">OPEN MAGNET</a>
       </div>
     );
   }
@@ -98,12 +92,6 @@ export default function TorrentPlayer({ magnet }: TorrentPlayerProps) {
           <p className="text-white font-bold tracking-widest uppercase">
             {status === 'loading' ? 'Connecting to Peers...' : 'Fetching Metadata...'}
           </p>
-          <div className="mt-4 w-48 h-1 bg-white/10 rounded-full overflow-hidden">
-            <div 
-              className="h-full bg-primary transition-all duration-300" 
-              style={{ width: `${progress}%` }}
-            />
-          </div>
           <p className="mt-2 text-xs text-gray-500">{progress}% downloaded</p>
         </div>
       )}
