@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import WebTorrent from 'webtorrent';
-import { Info, Loader2, Play } from 'lucide-react';
+import { Info, Loader2 } from 'lucide-react';
 
 interface TorrentPlayerProps {
   magnet: string;
@@ -17,46 +16,60 @@ export default function TorrentPlayer({ magnet }: TorrentPlayerProps) {
   useEffect(() => {
     if (!magnet) return;
 
-    const client = new WebTorrent();
-    
-    client.add(magnet, (torrent) => {
-      setStatus('metadata');
-      
-      // Find the video file (largest one or with video extension)
-      const file = torrent.files.find((f) => 
-        f.name.endsWith('.mp4') || 
-        f.name.endsWith('.mkv') || 
-        f.name.endsWith('.webm')
-      ) || torrent.files[0];
+    let client: any;
 
-      if (file && videoRef.current) {
-        file.renderTo(videoRef.current, {
-          autoplay: true,
-          controls: true,
-        }, (err) => {
-          if (err) {
-            console.error('Render error:', err);
-            setError('This file format might not be supported by your browser (e.g. MKV with HEVC).');
-            setStatus('error');
-          } else {
-            setStatus('ready');
+    const initWebTorrent = async () => {
+      try {
+        // Dynamically import WebTorrent only on the client side
+        const WebTorrent = (await import('webtorrent')).default;
+        client = new WebTorrent();
+
+        client.add(magnet, (torrent: any) => {
+          setStatus('metadata');
+          
+          // Find the video file
+          const file = torrent.files.find((f: any) => 
+            f.name.endsWith('.mp4') || 
+            f.name.endsWith('.mkv') || 
+            f.name.endsWith('.webm')
+          ) || torrent.files[0];
+
+          if (file && videoRef.current) {
+            file.renderTo(videoRef.current, {
+              autoplay: true,
+              controls: true,
+            }, (err: any) => {
+              if (err) {
+                console.error('Render error:', err);
+                setError('This file format might not be supported by your browser (e.g. MKV with HEVC).');
+                setStatus('error');
+              } else {
+                setStatus('ready');
+              }
+            });
           }
+
+          torrent.on('download', () => {
+            setProgress(Math.round(torrent.progress * 100));
+          });
         });
+
+        client.on('error', (err: any) => {
+          console.error('Client error:', err);
+          setError(err.message);
+          setStatus('error');
+        });
+      } catch (err: any) {
+        console.error('WebTorrent init error:', err);
+        setError('Failed to initialize torrent engine.');
+        setStatus('error');
       }
+    };
 
-      torrent.on('download', () => {
-        setProgress(Math.round(torrent.progress * 100));
-      });
-    });
-
-    client.on('error', (err) => {
-      console.error('Client error:', err);
-      setError(err.message);
-      setStatus('error');
-    });
+    initWebTorrent();
 
     return () => {
-      client.destroy();
+      if (client) client.destroy();
     };
   }, [magnet]);
 

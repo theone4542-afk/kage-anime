@@ -3,9 +3,14 @@ import { fetchEpisodes, fetchStreamLinks } from '@/lib/consumet';
 import { fetchBestRelease } from '@/lib/seadex';
 import { searchNyaa } from '@/lib/nyaa';
 import Player from '@/components/Player';
-import TorrentPlayer from '@/components/TorrentPlayer';
+import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { Calendar, Info, Tv, Star, Download } from 'lucide-react';
+
+const TorrentPlayer = dynamic(() => import('@/components/TorrentPlayer'), { 
+  ssr: false,
+  loading: () => <div className="aspect-video bg-secondary/20 animate-pulse rounded-xl" />
+});
 
 export default async function WatchPage({
   params,
