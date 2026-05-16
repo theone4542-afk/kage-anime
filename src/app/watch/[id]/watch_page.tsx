@@ -49,7 +49,8 @@ export default async function WatchPage({
   let streamUrl = '';
   if (!magnetUrl && currentEpisode) {
     try {
-      const data: any = await fetchStreamLinks(currentEpisode.id, currentEpisode.provider);
+      const ep = currentEpisode as any;
+      const data: any = await fetchStreamLinks(ep.id, ep.provider);
       streamUrl =
         data?.sources?.find((s: any) => s.quality === 'default' || s.quality === 'auto')?.url ||
         data?.sources?.[0]?.url ||
