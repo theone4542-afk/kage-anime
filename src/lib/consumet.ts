@@ -1,50 +1,32 @@
 import { ANIME } from '@consumet/extensions';
 
-const hianime = new ANIME.Hianime();
-const gogoanime = new ANIME.Gogoanime();
+const hianime = new ANIME.Zoro(); // Zoro is the current working Hianime provider in consumet
 const animepahe = new ANIME.AnimePahe();
-
-export interface Episode {
-  id: string;
-  number: number;
-  title?: string;
-  provider: 'hianime' | 'gogoanime' | 'animepahe';
-}
 
 export async function fetchEpisodes(animeTitle: string) {
   try {
-    // 1. Try Hianime
-    try {
-      const results = await hianime.search(animeTitle);
-      if (results.results.length > 0) {
-        const info = await hianime.fetchAnimeInfo(results.results[0].id);
-        return {
-          episodes: info.episodes.map((ep: any) => ({ ...ep, provider: 'hianime' })),
-        };
+    // Try Zoro/Hianime first
+    let results = await hianime.search(animeTitle);
+    if (results.results.length > 0) {
+      const anime = results.results[0];
+      const info = await hianime.fetchAnimeInfo(anime.id);
+      // Tag episodes with provider so fetchStreamLinks knows which to use
+      if (info?.episodes) {
+        info.episodes = info.episodes.map((ep: any) => ({ ...ep, provider: 'zoro' }));
       }
-    } catch (e) {}
+      return info;
+    }
 
-    // 2. Try Gogoanime
-    try {
-      const results = await gogoanime.search(animeTitle);
-      if (results.results.length > 0) {
-        const info = await gogoanime.fetchAnimeInfo(results.results[0].id);
-        return {
-          episodes: info.episodes.map((ep: any) => ({ ...ep, provider: 'gogoanime' })),
-        };
+    // Fallback to AnimePahe
+    results = await animepahe.search(animeTitle);
+    if (results.results.length > 0) {
+      const anime = results.results[0];
+      const info = await animepahe.fetchAnimeInfo(anime.id);
+      if (info?.episodes) {
+        info.episodes = info.episodes.map((ep: any) => ({ ...ep, provider: 'animepahe' }));
       }
-    } catch (e) {}
-
-    // 3. Try AnimePahe
-    try {
-      const results = await animepahe.search(animeTitle);
-      if (results.results.length > 0) {
-        const info = await animepahe.fetchAnimeInfo(results.results[0].id);
-        return {
-          episodes: info.episodes.map((ep: any) => ({ ...ep, provider: 'animepahe' })),
-        };
-      }
-    } catch (e) {}
+      return info;
+    }
 
     return null;
   } catch (error) {
@@ -53,21 +35,32 @@ export async function fetchEpisodes(animeTitle: string) {
   }
 }
 
-export async function fetchStreamLinks(episodeId: string, provider: string) {
+export async function fetchStreamLinks(episodeId: string, provider?: string) {
   try {
-    if (provider === 'hianime') {
-      return await hianime.fetchEpisodeSources(episodeId);
-    } else if (provider === 'gogoanime') {
-      return await gogoanime.fetchEpisodeSources(episodeId);
-    } else if (provider === 'animepahe') {
-      return await animepahe.fetchEpisodeSources(episodeId);
+    if (provider === 'animepahe') {
+      const links = await animepahe.fetchEpisodeSources(episodeId);
+      if (links?.sources?.length > 0) return links;
     }
+
+    // Default: try Zoro first
+    try {
+      const links = await hianime.fetchEpisodeSources(episodeId);
+      if (links?.sources?.length > 0) return links;
+    } catch {
+      // fall through
+    }
+
+    // Final fallback: AnimePahe
+    try {
+      const links = await animepahe.fetchEpisodeSources(episodeId);
+      if (links?.sources?.length > 0) return links;
+    } catch {
+      // fall through
+    }
+
     return null;
   } catch (error) {
-    console.error(`Error fetching stream links for ${provider}:`, error);
-    // Absolute fallback: try all if provider-specific fails
-    try { return await gogoanime.fetchEpisodeSources(episodeId); } catch(e) {}
-    try { return await hianime.fetchEpisodeSources(episodeId); } catch(e) {}
+    console.error('Error fetching stream links:', error);
     return null;
   }
 }
