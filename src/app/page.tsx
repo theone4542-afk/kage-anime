@@ -66,14 +66,14 @@ export default async function Home() {
           </Link>
         </div>
         
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-7 gap-6">
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-4 md:gap-6">
           {trending.slice(1).map((anime: any) => (
             <Link 
               key={anime.id} 
-              href={`/details/${anime.id}`}
+              href={`/watch/${anime.id}`}
               className="group relative flex flex-col"
             >
-              <div className="relative aspect-[2/3] overflow-hidden rounded-2xl border border-white/5 bg-secondary shadow-2xl transition-all duration-500 group-hover:-translate-y-2 group-hover:border-primary/30">
+              <div className="relative aspect-[2/3] overflow-hidden rounded-xl md:rounded-2xl border border-white/5 bg-secondary shadow-2xl transition-all duration-500 group-hover:-translate-y-2 group-hover:border-primary/30">
                 <Image
                   src={anime.coverImage.extraLarge || anime.coverImage.large}
                   alt={anime.title.romaji}

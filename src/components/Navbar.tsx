@@ -40,7 +40,7 @@ export default function Navbar() {
 
   const handleRandom = async () => {
     const id = await getRandomAnimeId();
-    if (id) router.push(`/details/${id}`);
+    if (id) router.push(`/watch/${id}`);
   };
 
   return (
@@ -79,7 +79,7 @@ export default function Navbar() {
                 {searchResults.map((anime) => (
                   <Link
                     key={anime.id}
-                    href={`/details/${anime.id}`}
+                    href={`/watch/${anime.id}`}
                     onClick={() => setSearchQuery('')}
                     className="flex items-center gap-4 p-3 hover:bg-white/5 rounded-xl transition-all group"
                   >

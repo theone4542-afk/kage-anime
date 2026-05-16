@@ -99,6 +99,8 @@ export const GET_ANIME_DETAILS_QUERY = `
             coverImage {
               large
             }
+          }
+        }
       }
     }
   }

@@ -1,17 +1,25 @@
 import { ANIME } from '@consumet/extensions';
 
-// Using AnimePahe as it's listed as available in the library
-const provider = new ANIME.AnimePahe();
+const hianime = new ANIME.Hianime();
+const animepahe = new ANIME.AnimePahe();
 
 export async function fetchEpisodes(animeTitle: string) {
   try {
-    const results = await provider.search(animeTitle);
-    if (results.results.length === 0) return null;
+    // Try Hianime first
+    let results = await hianime.search(animeTitle);
+    if (results.results.length > 0) {
+      const anime = results.results[0];
+      return await hianime.fetchAnimeInfo(anime.id);
+    }
 
-    // Find the best match
-    const anime = results.results[0];
-    const info = await provider.fetchAnimeInfo(anime.id);
-    return info;
+    // Fallback to AnimePahe
+    results = await animepahe.search(animeTitle);
+    if (results.results.length > 0) {
+      const anime = results.results[0];
+      return await animepahe.fetchAnimeInfo(anime.id);
+    }
+
+    return null;
   } catch (error) {
     console.error('Error fetching episodes:', error);
     return null;
@@ -20,8 +28,20 @@ export async function fetchEpisodes(animeTitle: string) {
 
 export async function fetchStreamLinks(episodeId: string) {
   try {
-    const links = await provider.fetchEpisodeSources(episodeId);
-    return links;
+    // Try Hianime first
+    try {
+      const links = await hianime.fetchEpisodeSources(episodeId);
+      if (links && links.sources && links.sources.length > 0) return links;
+    } catch (e) {
+      // ignore and try next
+    }
+
+    try {
+      const links = await animepahe.fetchEpisodeSources(episodeId);
+      return links;
+    } catch (e) {
+      return null;
+    }
   } catch (error) {
     console.error('Error fetching stream links:', error);
     return null;

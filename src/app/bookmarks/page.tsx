@@ -33,10 +33,10 @@ export default function BookmarksPage() {
             </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-4 md:gap-6">
             {bookmarks.map((anime) => (
               <div key={anime.id} className="group relative">
-                <Link href={`/details/${anime.id}`}>
+                <Link href={`/watch/${anime.id}`}>
                   <div className="relative aspect-[2/3] overflow-hidden rounded-xl border border-white/5 bg-secondary">
                     <Image
                       src={anime.image}
