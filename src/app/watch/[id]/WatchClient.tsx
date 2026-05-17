@@ -3,7 +3,10 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import SafeTorrentPlayer from '@/components/SafeTorrentPlayer';
-import { Calendar, Tv, Star, Download, AlertTriangle, Loader2, ChevronLeft, ChevronRight, Magnet } from 'lucide-react';
+import {
+  Calendar, Tv, Star, Download, AlertTriangle,
+  Loader2, ChevronLeft, ChevronRight, Magnet
+} from 'lucide-react';
 
 interface SeaDexInfo {
   bestRelease: string;
@@ -16,104 +19,6 @@ interface WatchClientProps {
   anime: any;
   totalEpisodes: number;
   currentEpNum: number;
-}
-
-// CORS proxy — routes browser requests through a proxy so Nyaa doesn't block us
-const CORS = 'https://corsproxy.io/?';
-
-async function fetchNyaaRSS(query: string): Promise<string> {
-  const nyaaUrl = `https://nyaa.si/?page=rss&q=${encodeURIComponent(query)}&c=1_2&f=0`;
-  const res = await fetch(`${CORS}${encodeURIComponent(nyaaUrl)}`);
-  if (!res.ok) throw new Error(`Nyaa fetch failed: ${res.status}`);
-  return res.text();
-}
-
-function parseNyaaRSS(xml: string) {
-  const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
-  return items.map(item => {
-    const title =
-      item.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/)?.[1] ||
-      item.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '';
-    const magnet =
-      item.match(/<nyaa:magnetUri><!\[CDATA\[([\s\S]*?)\]\]><\/nyaa:magnetUri>/)?.[1] ||
-      item.match(/<nyaa:magnetUri>([\s\S]*?)<\/nyaa:magnetUri>/)?.[1] || '';
-    const seeders = parseInt(item.match(/<nyaa:seeders>(\d+)<\/nyaa:seeders>/)?.[1] || '0');
-    return { title, magnet, seeders };
-  }).filter(r => r.magnet);
-}
-
-function pickEpisodeMatch(results: { title: string; magnet: string; seeders: number }[], paddedEp: string, epNum: number) {
-  const matches = results.filter(r => {
-    const t = r.title;
-    return (
-      t.includes(`- ${paddedEp}`) ||
-      t.includes(`- ${epNum}`) ||
-      t.includes(` ${paddedEp} `) ||
-      t.includes(`[${paddedEp}]`) ||
-      t.endsWith(` ${paddedEp}`) ||
-      t.endsWith(`-${paddedEp}`) ||
-      t.includes(`E${paddedEp}`)
-    );
-  });
-  const pool = matches.length > 0 ? matches : results;
-  pool.sort((a, b) => b.seeders - a.seeders);
-  return pool[0]?.magnet || '';
-}
-
-async function findMagnet(title: string, romajiTitle: string, epNum: number): Promise<string> {
-  const paddedEp = epNum.toString().padStart(2, '0');
-  const titles = [title, romajiTitle].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
-  const groups = ['SubsPlease', 'Erai-raws'];
-
-  for (const t of titles) {
-    for (const group of groups) {
-      try {
-        const xml = await fetchNyaaRSS(`${group} ${t} ${paddedEp}`);
-        const results = parseNyaaRSS(xml);
-        const match = pickEpisodeMatch(results, paddedEp, epNum);
-        if (match) return match;
-      } catch { /* try next */ }
-    }
-
-    // Fallback: title + episode only
-    try {
-      const xml = await fetchNyaaRSS(`${t} ${paddedEp}`);
-      const results = parseNyaaRSS(xml);
-      const match = pickEpisodeMatch(results, paddedEp, epNum);
-      if (match) return match;
-    } catch { /* try next */ }
-  }
-
-  return '';
-}
-
-async function fetchSeaDex(title: string): Promise<SeaDexInfo | null> {
-  try {
-    const url = `https://releases.moe/api/collections/entries/records?filter=title~"${encodeURIComponent(title)}"&perPage=5&expand=trs`;
-    const res = await fetch(`${CORS}${encodeURIComponent(url)}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const items = data?.items;
-    if (!items?.length) return null;
-
-    const match = items.find((item: any) => {
-      const t = (item.title || '').toLowerCase();
-      const s = title.toLowerCase();
-      return t.includes(s) || s.includes(t);
-    }) || items[0];
-
-    const trs: any[] = match.expand?.trs || [];
-    const bestTrs = trs.filter((t: any) => t.isBest);
-    const altTrs = trs.filter((t: any) => !t.isBest);
-
-    return {
-      bestRelease: bestTrs.map((t: any) => t.releaseGroup).filter(Boolean).join(', ') || match.bestRelease || '',
-      altRelease: altTrs.map((t: any) => t.releaseGroup).filter(Boolean).join(', ') || match.altRelease || '',
-      notes: match.notes || '',
-    };
-  } catch {
-    return null;
-  }
 }
 
 export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNum }: WatchClientProps) {
@@ -134,14 +39,19 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
     setMagnet('');
     setSeadex(null);
 
-    // Run both searches in parallel, entirely in the browser
-    Promise.all([
-      findMagnet(title, romajiTitle, currentEpNum),
-      fetchSeaDex(title),
-    ])
-      .then(([mag, sdx]) => {
-        setMagnet(mag);
-        setSeadex(sdx);
+    // Call our own edge API route — runs on Cloudflare, not blocked by Nyaa
+    const params = new URLSearchParams({
+      title,
+      romaji: romajiTitle,
+      ep: String(currentEpNum),
+    });
+
+    fetch(`/api/torrent?${params}`)
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) { setSearchFailed(true); return; }
+        setMagnet(data.magnet || '');
+        setSeadex(data.seadex || null);
       })
       .catch(() => setSearchFailed(true))
       .finally(() => setSearching(false));
@@ -151,10 +61,8 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
     <main className="min-h-screen bg-[#0b0b0b] pt-16">
       <div className="max-w-[1800px] mx-auto flex flex-col xl:flex-row">
 
-        {/* LEFT: Player column */}
+        {/* LEFT: Player */}
         <div className="flex-1 min-w-0">
-
-          {/* Player */}
           <div className="w-full bg-black">
             {searching ? (
               <div className="aspect-video flex flex-col items-center justify-center gap-3 bg-[#0d0d0d]">
@@ -219,13 +127,12 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
                   ? 'bg-red-500/10 text-red-400 border-red-500/20'
                   : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
               }`}>
-                {magnet ? (
-                  <><Download size={12} /> CR WEB-DL · SubsPlease / Erai-raws</>
-                ) : searchFailed ? (
-                  <><AlertTriangle size={12} /> Search failed — try reloading</>
-                ) : (
-                  <><AlertTriangle size={12} /> No torrent found for this episode</>
-                )}
+                {magnet
+                  ? <><Download size={12} /> CR WEB-DL · SubsPlease / Erai-raws</>
+                  : searchFailed
+                  ? <><AlertTriangle size={12} /> Search failed — try reloading</>
+                  : <><AlertTriangle size={12} /> No torrent found for this episode</>
+                }
               </div>
             )}
 
@@ -241,7 +148,7 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
               </div>
             )}
 
-            {/* Prev/Next */}
+            {/* Prev / Next */}
             <div className="flex items-center gap-3">
               {prevEp ? (
                 <Link
@@ -281,7 +188,6 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
 
         {/* RIGHT: Episode sidebar */}
         <div className="w-full xl:w-[320px] shrink-0 border-l border-white/5 flex flex-col xl:h-[calc(100vh-64px)] xl:sticky xl:top-16">
-
           <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between bg-[#111]">
             <h2 className="text-sm font-black text-white uppercase tracking-wider">Episodes</h2>
             <span className="text-xs text-gray-600 font-bold">{totalEpisodes} Total</span>
