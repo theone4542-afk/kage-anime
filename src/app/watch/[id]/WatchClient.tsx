@@ -1,10 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
-import SafeTorrentPlayer from '@/components/SafeTorrentPlayer';
 import Link from 'next/link';
-import { Calendar, Tv, Star, Download, AlertTriangle, Loader2 } from 'lucide-react';
+import SafeTorrentPlayer from '@/components/SafeTorrentPlayer';
+import { Calendar, Tv, Star, Download, AlertTriangle, Loader2, ChevronLeft, ChevronRight, Magnet } from 'lucide-react';
 
 interface SeaDexInfo {
   bestRelease: string;
@@ -19,12 +18,7 @@ interface WatchClientProps {
   currentEpNum: number;
 }
 
-export default function WatchClient({
-  animeId,
-  anime,
-  totalEpisodes,
-  currentEpNum,
-}: WatchClientProps) {
+export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNum }: WatchClientProps) {
   const [magnet, setMagnet] = useState<string>('');
   const [seadex, setSeadex] = useState<SeaDexInfo | null>(null);
   const [searching, setSearching] = useState(true);
@@ -40,155 +34,201 @@ export default function WatchClient({
     setMagnet('');
     setSeadex(null);
 
-    const params = new URLSearchParams({
-      title,
-      romaji: romajiTitle,
-      ep: String(currentEpNum),
-    });
-
+    const params = new URLSearchParams({ title, romaji: romajiTitle, ep: String(currentEpNum) });
     fetch(`/api/torrent?${params}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.error) {
-          setSearchFailed(true);
-        } else {
-          setMagnet(data.magnet || '');
-          setSeadex(data.seadex || null);
-        }
+      .then(r => r.json())
+      .then(data => {
+        if (data.error) { setSearchFailed(true); return; }
+        setMagnet(data.magnet || '');
+        setSeadex(data.seadex || null);
       })
       .catch(() => setSearchFailed(true))
       .finally(() => setSearching(false));
   }, [title, romajiTitle, currentEpNum]);
 
+  const prevEp = currentEpNum > 1 ? currentEpNum - 1 : null;
+  const nextEp = currentEpNum < totalEpisodes ? currentEpNum + 1 : null;
+
   return (
-    <main className="min-h-screen p-4 md:p-8 lg:p-12 pt-24 bg-[#050505]">
-      <div className="max-w-[1600px] mx-auto">
+    <main className="min-h-screen bg-[#0b0b0b] pt-16">
+      <div className="max-w-[1800px] mx-auto flex flex-col xl:flex-row gap-0">
 
-        {/* Status Banner */}
-        {searching ? (
-          <div className="mb-6 bg-white/5 border border-white/10 p-4 rounded-xl flex items-center gap-3">
-            <Loader2 className="text-primary animate-spin shrink-0" size={20} />
-            <p className="text-gray-400 text-sm">
-              Searching Nyaa for <span className="text-white font-bold">{title}</span> Episode {currentEpNum}...
-            </p>
-          </div>
-        ) : searchFailed ? (
-          <div className="mb-6 bg-red-500/10 border border-red-500/20 p-4 rounded-xl flex items-center gap-3">
-            <AlertTriangle className="text-red-500 shrink-0" size={20} />
-            <p className="text-red-400 text-sm">Search failed. Check your connection or try again.</p>
-          </div>
-        ) : seadex ? (
-          <div className="mb-6 bg-primary/10 border border-primary/20 p-4 rounded-xl flex items-center gap-4 flex-wrap">
-            <div className="w-10 h-10 bg-primary/20 rounded-full flex items-center justify-center text-primary shrink-0">
-              <Star size={20} fill="currentColor" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="text-primary font-bold text-xs uppercase tracking-wider">SeaDex Best Print</h3>
-              <p className="text-white text-sm font-medium truncate">{seadex.bestRelease}</p>
-              {seadex.altRelease && (
-                <p className="text-gray-500 text-xs truncate">Alt: {seadex.altRelease}</p>
-              )}
-            </div>
-            <div className={`px-3 py-1 rounded-lg text-xs font-bold border flex items-center gap-2 shrink-0 ${
-              magnet
-                ? 'bg-green-500/10 text-green-500 border-green-500/20'
-                : 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'
-            }`}>
-              <Download size={14} />
-              {magnet ? 'CR WEB-DL FOUND' : 'NOT FOUND ON NYAA'}
-            </div>
-          </div>
-        ) : !searching && !magnet ? (
-          <div className="mb-6 bg-yellow-500/10 border border-yellow-500/20 p-4 rounded-xl flex items-center gap-3">
-            <AlertTriangle className="text-yellow-500 shrink-0" size={20} />
-            <p className="text-yellow-400 text-sm">
-              No SeaDex entry for <span className="font-bold">{title}</span>. Searched Nyaa directly.
-            </p>
-          </div>
-        ) : null}
+        {/* LEFT: Player Column */}
+        <div className="flex-1 min-w-0">
 
-        <div className="flex flex-col xl:flex-row gap-8">
-
-          {/* Player & Info */}
-          <div className="flex-1 min-w-0">
-            {/* Show player only after search completes */}
+          {/* Player */}
+          <div className="w-full bg-black">
             {searching ? (
-              <div className="aspect-video bg-secondary/20 rounded-2xl border border-white/5 flex flex-col items-center justify-center gap-4">
-                <Loader2 className="text-primary animate-spin" size={48} />
-                <p className="text-gray-500 text-sm font-bold tracking-widest uppercase">
-                  Finding Best Source...
-                </p>
+              <div className="aspect-video flex flex-col items-center justify-center gap-3 bg-[#0d0d0d]">
+                <Loader2 className="text-primary animate-spin" size={44} />
+                <p className="text-gray-500 text-xs font-bold tracking-[0.2em] uppercase">Searching Nyaa...</p>
               </div>
             ) : (
               <SafeTorrentPlayer magnet={magnet} />
             )}
+          </div>
 
-            <div className="mt-8 bg-secondary/20 p-6 rounded-2xl border border-white/5">
-              <h1 className="text-2xl md:text-3xl font-black text-white mb-4 leading-tight">
-                {anime.title.english || anime.title.romaji}
-              </h1>
+          {/* Below player */}
+          <div className="p-4 md:p-6 border-b border-white/5">
 
-              <div className="flex flex-wrap gap-3 text-sm mb-6">
-                <div className="flex items-center gap-1.5 bg-primary/10 text-primary px-3 py-1 rounded-lg border border-primary/20 font-bold">
-                  EP {currentEpNum}
-                </div>
-                <div className="flex items-center gap-1.5 bg-white/5 text-gray-300 px-3 py-1 rounded-lg">
-                  <Tv size={14} /> {anime.status}
-                </div>
-                <div className="flex items-center gap-1.5 bg-white/5 text-gray-300 px-3 py-1 rounded-lg">
-                  <Calendar size={14} /> {anime.seasonYear}
-                </div>
-                {anime.averageScore && (
-                  <div className="flex items-center gap-1.5 bg-white/5 text-gray-300 px-3 py-1 rounded-lg">
-                    <Star size={14} className="text-primary" fill="currentColor" /> {anime.averageScore}%
-                  </div>
+            {/* Title + badges */}
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div>
+                <h1 className="text-lg md:text-2xl font-black text-white leading-tight">
+                  {anime.title.english || anime.title.romaji}
+                </h1>
+                {anime.title.romaji !== anime.title.english && (
+                  <p className="text-gray-600 text-sm mt-0.5">{anime.title.romaji}</p>
                 )}
               </div>
+              {magnet && (
+                <a
+                  href={magnet}
+                  title="Open magnet link"
+                  className="shrink-0 flex items-center gap-1.5 text-[11px] font-bold text-gray-500 hover:text-primary transition-colors border border-white/10 hover:border-primary/40 px-3 py-1.5 rounded-lg"
+                >
+                  <Magnet size={13} /> Magnet
+                </a>
+              )}
+            </div>
 
-              <p
-                className="text-gray-400 text-sm leading-relaxed line-clamp-4"
-                dangerouslySetInnerHTML={{ __html: anime.description || '' }}
-              />
+            {/* Meta row */}
+            <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mb-4">
+              <span className="bg-primary/10 text-primary font-black px-2.5 py-1 rounded-md border border-primary/20">
+                EP {currentEpNum}
+              </span>
+              <span className="bg-white/5 px-2.5 py-1 rounded-md flex items-center gap-1">
+                <Tv size={11} /> {anime.status}
+              </span>
+              <span className="bg-white/5 px-2.5 py-1 rounded-md flex items-center gap-1">
+                <Calendar size={11} /> {anime.season} {anime.seasonYear}
+              </span>
+              {anime.averageScore && (
+                <span className="bg-white/5 px-2.5 py-1 rounded-md flex items-center gap-1">
+                  <Star size={11} className="text-yellow-400" fill="currentColor" /> {anime.averageScore}%
+                </span>
+              )}
+              <span className="bg-white/5 px-2.5 py-1 rounded-md">{anime.duration}m</span>
+            </div>
 
-              {seadex?.notes && (
-                <div className="mt-6 pt-6 border-t border-white/5">
-                  <h4 className="text-sm font-bold text-gray-500 uppercase tracking-widest mb-2">
-                    Release Notes
-                  </h4>
-                  <p className="text-sm text-gray-400 italic">"{seadex.notes}"</p>
-                </div>
+            {/* Source badge */}
+            {!searching && (
+              <div className={`inline-flex items-center gap-2 text-[11px] font-bold px-3 py-1.5 rounded-lg border mb-4 ${
+                magnet
+                  ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                  : searchFailed
+                  ? 'bg-red-500/10 text-red-400 border-red-500/20'
+                  : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+              }`}>
+                {magnet ? (
+                  <><Download size={12} /> CR WEB-DL · SubsPlease / Erai-raws</>
+                ) : searchFailed ? (
+                  <><AlertTriangle size={12} /> Search failed</>
+                ) : (
+                  <><AlertTriangle size={12} /> No torrent found for this episode</>
+                )}
+              </div>
+            )}
+
+            {/* SeaDex info */}
+            {seadex && (
+              <div className="bg-white/3 border border-white/5 rounded-xl p-4 mb-4">
+                <p className="text-[10px] font-black text-primary uppercase tracking-widest mb-1">SeaDex Recommendation</p>
+                <p className="text-white text-sm font-semibold">{seadex.bestRelease}</p>
+                {seadex.altRelease && <p className="text-gray-500 text-xs mt-0.5">Alt: {seadex.altRelease}</p>}
+                {seadex.notes && <p className="text-gray-500 text-xs mt-2 italic border-t border-white/5 pt-2">"{seadex.notes}"</p>}
+              </div>
+            )}
+
+            {/* Ep nav */}
+            <div className="flex items-center gap-3">
+              {prevEp ? (
+                <Link
+                  href={`/watch/${animeId}?ep=${prevEp}`}
+                  className="flex items-center gap-2 bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white text-sm font-bold px-4 py-2.5 rounded-xl transition-all border border-white/5"
+                >
+                  <ChevronLeft size={16} /> EP {prevEp}
+                </Link>
+              ) : <div />}
+              {nextEp && (
+                <Link
+                  href={`/watch/${animeId}?ep=${nextEp}`}
+                  className="flex items-center gap-2 bg-primary text-black text-sm font-black px-4 py-2.5 rounded-xl transition-all hover:scale-105 shadow-lg shadow-primary/20"
+                >
+                  EP {nextEp} <ChevronRight size={16} />
+                </Link>
               )}
             </div>
           </div>
 
-          {/* Episode Sidebar */}
-          <div className="w-full xl:w-80 shrink-0">
-            <div className="bg-secondary/30 rounded-2xl border border-white/5 overflow-hidden flex flex-col max-h-[85vh]">
-              <div className="p-5 border-b border-white/5 bg-white/5 flex items-center justify-between">
-                <h2 className="text-lg font-bold text-white">Episodes</h2>
-                <span className="text-xs text-gray-500">{episodeList.length} Total</span>
-              </div>
-              <div className="p-3 overflow-y-auto custom-scrollbar flex-1">
-                <div className="grid grid-cols-5 gap-1.5">
-                  {episodeList.map((epNum) => (
-                    <Link
-                      key={epNum}
-                      href={`/watch/${animeId}?ep=${epNum}`}
-                      className={`aspect-square flex items-center justify-center text-sm font-bold rounded-xl transition-all ${
-                        epNum === currentEpNum
-                          ? 'bg-primary text-black shadow-lg shadow-primary/20'
-                          : 'bg-white/5 text-gray-400 hover:bg-white/10 hover:text-white'
-                      }`}
-                    >
-                      {epNum}
-                    </Link>
-                  ))}
-                </div>
-              </div>
+          {/* Description */}
+          <div className="p-4 md:p-6">
+            <h3 className="text-xs font-black text-gray-600 uppercase tracking-widest mb-3">Synopsis</h3>
+            <p
+              className="text-gray-400 text-sm leading-relaxed"
+              dangerouslySetInnerHTML={{ __html: anime.description || '' }}
+            />
+            <div className="flex flex-wrap gap-2 mt-4">
+              {(anime.genres || []).map((g: string) => (
+                <span key={g} className="text-[11px] font-bold text-gray-500 bg-white/5 px-3 py-1 rounded-full border border-white/5">
+                  {g}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT: Episode Sidebar */}
+        <div className="w-full xl:w-[340px] shrink-0 border-l border-white/5 flex flex-col xl:h-screen xl:sticky xl:top-16">
+
+          {/* Sidebar header */}
+          <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between bg-[#111]">
+            <h2 className="text-sm font-black text-white uppercase tracking-wider">Episodes</h2>
+            <span className="text-xs text-gray-600 font-bold">{totalEpisodes} Total</span>
+          </div>
+
+          {/* Episode grid */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-3">
+            <div className="grid grid-cols-5 gap-1.5">
+              {episodeList.map((epNum) => (
+                <Link
+                  key={epNum}
+                  href={`/watch/${animeId}?ep=${epNum}`}
+                  className={`aspect-square flex items-center justify-center text-xs font-black rounded-lg transition-all duration-150 ${
+                    epNum === currentEpNum
+                      ? 'bg-primary text-black shadow-lg shadow-primary/30 scale-105'
+                      : 'bg-white/5 text-gray-500 hover:bg-white/10 hover:text-white'
+                  }`}
+                >
+                  {epNum}
+                </Link>
+              ))}
             </div>
           </div>
 
+          {/* Anime info card at bottom of sidebar */}
+          <div className="border-t border-white/5 p-4 bg-[#0f0f0f] hidden xl:block">
+            <div className="flex gap-3 items-center">
+              {anime.coverImage?.large && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={anime.coverImage.large}
+                  alt=""
+                  className="w-12 h-16 object-cover rounded-lg border border-white/10 shrink-0"
+                />
+              )}
+              <div className="min-w-0">
+                <p className="text-white text-sm font-black line-clamp-2 leading-tight">
+                  {anime.title.english || anime.title.romaji}
+                </p>
+                <p className="text-gray-600 text-xs mt-1">
+                  {anime.studios?.nodes?.[0]?.name || ''}
+                </p>
+              </div>
+            </div>
+          </div>
         </div>
+
       </div>
     </main>
   );
