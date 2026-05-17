@@ -18,8 +18,106 @@ interface WatchClientProps {
   currentEpNum: number;
 }
 
+// CORS proxy — routes browser requests through a proxy so Nyaa doesn't block us
+const CORS = 'https://corsproxy.io/?';
+
+async function fetchNyaaRSS(query: string): Promise<string> {
+  const nyaaUrl = `https://nyaa.si/?page=rss&q=${encodeURIComponent(query)}&c=1_2&f=0`;
+  const res = await fetch(`${CORS}${encodeURIComponent(nyaaUrl)}`);
+  if (!res.ok) throw new Error(`Nyaa fetch failed: ${res.status}`);
+  return res.text();
+}
+
+function parseNyaaRSS(xml: string) {
+  const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
+  return items.map(item => {
+    const title =
+      item.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/)?.[1] ||
+      item.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '';
+    const magnet =
+      item.match(/<nyaa:magnetUri><!\[CDATA\[([\s\S]*?)\]\]><\/nyaa:magnetUri>/)?.[1] ||
+      item.match(/<nyaa:magnetUri>([\s\S]*?)<\/nyaa:magnetUri>/)?.[1] || '';
+    const seeders = parseInt(item.match(/<nyaa:seeders>(\d+)<\/nyaa:seeders>/)?.[1] || '0');
+    return { title, magnet, seeders };
+  }).filter(r => r.magnet);
+}
+
+function pickEpisodeMatch(results: { title: string; magnet: string; seeders: number }[], paddedEp: string, epNum: number) {
+  const matches = results.filter(r => {
+    const t = r.title;
+    return (
+      t.includes(`- ${paddedEp}`) ||
+      t.includes(`- ${epNum}`) ||
+      t.includes(` ${paddedEp} `) ||
+      t.includes(`[${paddedEp}]`) ||
+      t.endsWith(` ${paddedEp}`) ||
+      t.endsWith(`-${paddedEp}`) ||
+      t.includes(`E${paddedEp}`)
+    );
+  });
+  const pool = matches.length > 0 ? matches : results;
+  pool.sort((a, b) => b.seeders - a.seeders);
+  return pool[0]?.magnet || '';
+}
+
+async function findMagnet(title: string, romajiTitle: string, epNum: number): Promise<string> {
+  const paddedEp = epNum.toString().padStart(2, '0');
+  const titles = [title, romajiTitle].filter(Boolean).filter((v, i, a) => a.indexOf(v) === i);
+  const groups = ['SubsPlease', 'Erai-raws'];
+
+  for (const t of titles) {
+    for (const group of groups) {
+      try {
+        const xml = await fetchNyaaRSS(`${group} ${t} ${paddedEp}`);
+        const results = parseNyaaRSS(xml);
+        const match = pickEpisodeMatch(results, paddedEp, epNum);
+        if (match) return match;
+      } catch { /* try next */ }
+    }
+
+    // Fallback: title + episode only
+    try {
+      const xml = await fetchNyaaRSS(`${t} ${paddedEp}`);
+      const results = parseNyaaRSS(xml);
+      const match = pickEpisodeMatch(results, paddedEp, epNum);
+      if (match) return match;
+    } catch { /* try next */ }
+  }
+
+  return '';
+}
+
+async function fetchSeaDex(title: string): Promise<SeaDexInfo | null> {
+  try {
+    const url = `https://releases.moe/api/collections/entries/records?filter=title~"${encodeURIComponent(title)}"&perPage=5&expand=trs`;
+    const res = await fetch(`${CORS}${encodeURIComponent(url)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const items = data?.items;
+    if (!items?.length) return null;
+
+    const match = items.find((item: any) => {
+      const t = (item.title || '').toLowerCase();
+      const s = title.toLowerCase();
+      return t.includes(s) || s.includes(t);
+    }) || items[0];
+
+    const trs: any[] = match.expand?.trs || [];
+    const bestTrs = trs.filter((t: any) => t.isBest);
+    const altTrs = trs.filter((t: any) => !t.isBest);
+
+    return {
+      bestRelease: bestTrs.map((t: any) => t.releaseGroup).filter(Boolean).join(', ') || match.bestRelease || '',
+      altRelease: altTrs.map((t: any) => t.releaseGroup).filter(Boolean).join(', ') || match.altRelease || '',
+      notes: match.notes || '',
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNum }: WatchClientProps) {
-  const [magnet, setMagnet] = useState<string>('');
+  const [magnet, setMagnet] = useState('');
   const [seadex, setSeadex] = useState<SeaDexInfo | null>(null);
   const [searching, setSearching] = useState(true);
   const [searchFailed, setSearchFailed] = useState(false);
@@ -27,6 +125,8 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
   const title = anime.title.english || anime.title.romaji;
   const romajiTitle = anime.title.romaji || '';
   const episodeList = Array.from({ length: totalEpisodes }, (_, i) => i + 1);
+  const prevEp = currentEpNum > 1 ? currentEpNum - 1 : null;
+  const nextEp = currentEpNum < totalEpisodes ? currentEpNum + 1 : null;
 
   useEffect(() => {
     setSearching(true);
@@ -34,26 +134,24 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
     setMagnet('');
     setSeadex(null);
 
-    const params = new URLSearchParams({ title, romaji: romajiTitle, ep: String(currentEpNum) });
-    fetch(`/api/torrent?${params}`)
-      .then(r => r.json())
-      .then(data => {
-        if (data.error) { setSearchFailed(true); return; }
-        setMagnet(data.magnet || '');
-        setSeadex(data.seadex || null);
+    // Run both searches in parallel, entirely in the browser
+    Promise.all([
+      findMagnet(title, romajiTitle, currentEpNum),
+      fetchSeaDex(title),
+    ])
+      .then(([mag, sdx]) => {
+        setMagnet(mag);
+        setSeadex(sdx);
       })
       .catch(() => setSearchFailed(true))
       .finally(() => setSearching(false));
   }, [title, romajiTitle, currentEpNum]);
 
-  const prevEp = currentEpNum > 1 ? currentEpNum - 1 : null;
-  const nextEp = currentEpNum < totalEpisodes ? currentEpNum + 1 : null;
-
   return (
     <main className="min-h-screen bg-[#0b0b0b] pt-16">
-      <div className="max-w-[1800px] mx-auto flex flex-col xl:flex-row gap-0">
+      <div className="max-w-[1800px] mx-auto flex flex-col xl:flex-row">
 
-        {/* LEFT: Player Column */}
+        {/* LEFT: Player column */}
         <div className="flex-1 min-w-0">
 
           {/* Player */}
@@ -68,10 +166,9 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
             )}
           </div>
 
-          {/* Below player */}
+          {/* Info below player */}
           <div className="p-4 md:p-6 border-b border-white/5">
 
-            {/* Title + badges */}
             <div className="flex items-start justify-between gap-4 mb-3">
               <div>
                 <h1 className="text-lg md:text-2xl font-black text-white leading-tight">
@@ -92,7 +189,7 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
               )}
             </div>
 
-            {/* Meta row */}
+            {/* Meta */}
             <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500 mb-4">
               <span className="bg-primary/10 text-primary font-black px-2.5 py-1 rounded-md border border-primary/20">
                 EP {currentEpNum}
@@ -108,10 +205,12 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
                   <Star size={11} className="text-yellow-400" fill="currentColor" /> {anime.averageScore}%
                 </span>
               )}
-              <span className="bg-white/5 px-2.5 py-1 rounded-md">{anime.duration}m</span>
+              {anime.duration && (
+                <span className="bg-white/5 px-2.5 py-1 rounded-md">{anime.duration}m</span>
+              )}
             </div>
 
-            {/* Source badge */}
+            {/* Source status */}
             {!searching && (
               <div className={`inline-flex items-center gap-2 text-[11px] font-bold px-3 py-1.5 rounded-lg border mb-4 ${
                 magnet
@@ -123,24 +222,26 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
                 {magnet ? (
                   <><Download size={12} /> CR WEB-DL · SubsPlease / Erai-raws</>
                 ) : searchFailed ? (
-                  <><AlertTriangle size={12} /> Search failed</>
+                  <><AlertTriangle size={12} /> Search failed — try reloading</>
                 ) : (
                   <><AlertTriangle size={12} /> No torrent found for this episode</>
                 )}
               </div>
             )}
 
-            {/* SeaDex info */}
-            {seadex && (
+            {/* SeaDex */}
+            {seadex?.bestRelease && (
               <div className="bg-white/3 border border-white/5 rounded-xl p-4 mb-4">
                 <p className="text-[10px] font-black text-primary uppercase tracking-widest mb-1">SeaDex Recommendation</p>
                 <p className="text-white text-sm font-semibold">{seadex.bestRelease}</p>
                 {seadex.altRelease && <p className="text-gray-500 text-xs mt-0.5">Alt: {seadex.altRelease}</p>}
-                {seadex.notes && <p className="text-gray-500 text-xs mt-2 italic border-t border-white/5 pt-2">"{seadex.notes}"</p>}
+                {seadex.notes && (
+                  <p className="text-gray-500 text-xs mt-2 italic border-t border-white/5 pt-2">"{seadex.notes}"</p>
+                )}
               </div>
             )}
 
-            {/* Ep nav */}
+            {/* Prev/Next */}
             <div className="flex items-center gap-3">
               {prevEp ? (
                 <Link
@@ -153,7 +254,7 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
               {nextEp && (
                 <Link
                   href={`/watch/${animeId}?ep=${nextEp}`}
-                  className="flex items-center gap-2 bg-primary text-black text-sm font-black px-4 py-2.5 rounded-xl transition-all hover:scale-105 shadow-lg shadow-primary/20"
+                  className="flex items-center gap-2 bg-primary text-black text-sm font-black px-4 py-2.5 rounded-xl hover:scale-105 transition-all shadow-lg shadow-primary/20"
                 >
                   EP {nextEp} <ChevronRight size={16} />
                 </Link>
@@ -161,7 +262,7 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
             </div>
           </div>
 
-          {/* Description */}
+          {/* Synopsis */}
           <div className="p-4 md:p-6">
             <h3 className="text-xs font-black text-gray-600 uppercase tracking-widest mb-3">Synopsis</h3>
             <p
@@ -178,16 +279,14 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
           </div>
         </div>
 
-        {/* RIGHT: Episode Sidebar */}
-        <div className="w-full xl:w-[340px] shrink-0 border-l border-white/5 flex flex-col xl:h-screen xl:sticky xl:top-16">
+        {/* RIGHT: Episode sidebar */}
+        <div className="w-full xl:w-[320px] shrink-0 border-l border-white/5 flex flex-col xl:h-[calc(100vh-64px)] xl:sticky xl:top-16">
 
-          {/* Sidebar header */}
           <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between bg-[#111]">
             <h2 className="text-sm font-black text-white uppercase tracking-wider">Episodes</h2>
             <span className="text-xs text-gray-600 font-bold">{totalEpisodes} Total</span>
           </div>
 
-          {/* Episode grid */}
           <div className="flex-1 overflow-y-auto custom-scrollbar p-3">
             <div className="grid grid-cols-5 gap-1.5">
               {episodeList.map((epNum) => (
@@ -206,7 +305,6 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
             </div>
           </div>
 
-          {/* Anime info card at bottom of sidebar */}
           <div className="border-t border-white/5 p-4 bg-[#0f0f0f] hidden xl:block">
             <div className="flex gap-3 items-center">
               {anime.coverImage?.large && (
@@ -221,9 +319,7 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
                 <p className="text-white text-sm font-black line-clamp-2 leading-tight">
                   {anime.title.english || anime.title.romaji}
                 </p>
-                <p className="text-gray-600 text-xs mt-1">
-                  {anime.studios?.nodes?.[0]?.name || ''}
-                </p>
+                <p className="text-gray-600 text-xs mt-1">{anime.studios?.nodes?.[0]?.name || ''}</p>
               </div>
             </div>
           </div>
