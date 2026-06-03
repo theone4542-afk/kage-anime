@@ -17,10 +17,10 @@ export async function GET(request: NextRequest) {
     }
 
     // Find the matching episode
-    const episode = info.episodes.find((e: any) => e.number === ep) || info.episodes[0];
+    const episode: any = info.episodes.find((e: any) => e.number === ep) || info.episodes[0];
     
     // Fetch stream links for that episode
-    const streamLinks = await fetchStreamLinks(episode.id, episode.provider);
+    const streamLinks = await fetchStreamLinks(episode.id, (episode.provider as string) || undefined);
     
     return NextResponse.json({
       ...streamLinks,
