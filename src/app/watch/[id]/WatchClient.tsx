@@ -41,7 +41,7 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
     setSearchFailed(false);
     setResult(null);
 
-    fetch(`/api/torrent?anilistId=${animeId}&ep=${currentEpNum}`)
+    fetch(`/api/torrent?anilistId=${animeId}&title=${encodeURIComponent(title)}&romaji=${encodeURIComponent(romajiTitle)}&ep=${currentEpNum}`)
       .then(r => r.json())
       .then(data => setResult(data))
       .catch(() => setSearchFailed(true))

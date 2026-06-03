@@ -12,7 +12,6 @@ export default async function WatchPage({
   const { ep } = await searchParams;
   const animeId = parseInt(id);
 
-  // Server only does the fast AniList fetch
   const anilistData: any = await client.request(GET_ANIME_DETAILS_QUERY, { id: animeId });
   const anime = anilistData.Media;
 
