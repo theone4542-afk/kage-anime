@@ -12,22 +12,33 @@ export function useBookmarks() {
   const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
 
   useEffect(() => {
-    const saved = localStorage.getItem('kage_bookmarks');
-    if (saved) {
-      setBookmarks(JSON.parse(saved));
-    }
+    const load = () => {
+      const saved = localStorage.getItem('kage_bookmarks');
+      if (saved) {
+        setBookmarks(JSON.parse(saved));
+      }
+    };
+    
+    load();
+    window.addEventListener('bookmarks-updated', load);
+    return () => window.removeEventListener('bookmarks-updated', load);
   }, []);
 
   const toggleBookmark = (anime: Bookmark) => {
-    const isBookmarked = bookmarks.some((b) => b.id === anime.id);
+    const saved = localStorage.getItem('kage_bookmarks');
+    let current: Bookmark[] = saved ? JSON.parse(saved) : [];
+    
+    const isBookmarked = current.some((b) => b.id === anime.id);
     let newBookmarks;
     if (isBookmarked) {
-      newBookmarks = bookmarks.filter((b) => b.id !== anime.id);
+      newBookmarks = current.filter((b) => b.id !== anime.id);
     } else {
-      newBookmarks = [...bookmarks, anime];
+      newBookmarks = [...current, anime];
     }
-    setBookmarks(newBookmarks);
+    
     localStorage.setItem('kage_bookmarks', JSON.stringify(newBookmarks));
+    setBookmarks(newBookmarks);
+    window.dispatchEvent(new CustomEvent('bookmarks-updated'));
   };
 
   const isBookmarked = (id: number) => bookmarks.some((b) => b.id === id);

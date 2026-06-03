@@ -47,7 +47,6 @@ export default function Player({ url }: PlayerProps) {
             attributes: {
               crossOrigin: 'anonymous'
             },
-            forceHLS: true,
           },
         } as any}
       />
