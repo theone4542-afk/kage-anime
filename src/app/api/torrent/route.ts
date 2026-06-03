@@ -16,23 +16,29 @@ function parseNyaaRSS(xml: string) {
   }).filter(r => r.magnet);
 }
 
-function pickBest(
-  results: { title: string; magnet: string; seeders: number }[],
-  paddedEp: string,
-  epNum: number
-) {
-  const matches = results.filter(r => {
-    const t = r.title;
-    return (
-      t.includes(`- ${paddedEp}`) ||
-      t.includes(`- ${epNum} `) ||
-      t.includes(` ${paddedEp} `) ||
-      t.includes(`[${paddedEp}]`) ||
-      t.endsWith(` ${paddedEp}`) ||
-      t.endsWith(`-${paddedEp}`) ||
-      t.includes(`E${paddedEp}`)
-    );
-  });
+function matchesEpisode(title: string, epNum: number): boolean {
+  // Build all possible episode number formats:
+  // 01, 001, 0001, 1 — SubsPlease uses variable padding
+  const variants = [
+    epNum.toString(),                          // 1
+    epNum.toString().padStart(2, '0'),         // 01
+    epNum.toString().padStart(3, '0'),         // 001
+    epNum.toString().padStart(4, '0'),         // 0001
+  ];
+
+  return variants.some(v =>
+    title.includes(`- ${v} `) ||
+    title.includes(`- ${v}(`) ||   // "- 01(720p)"
+    title.endsWith(`- ${v}`) ||
+    title.includes(`[${v}]`) ||
+    title.includes(` ${v} `) ||
+    title.endsWith(` ${v}`) ||
+    title.includes(`E${v}`)
+  );
+}
+
+function pickBest(results: { title: string; magnet: string; seeders: number }[], epNum: number) {
+  const matches = results.filter(r => matchesEpisode(r.title, epNum));
   const pool = matches.length > 0 ? matches : results;
   pool.sort((a, b) => b.seeders - a.seeders);
   return pool[0]?.magnet || '';
@@ -44,53 +50,58 @@ async function searchNyaa(query: string) {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
       'Accept': 'application/xml, text/xml, */*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Cache-Control': 'no-cache',
     },
   });
-
-  // Return status alongside xml so we can debug
   const text = res.ok ? await res.text() : '';
   return { xml: text, status: res.status };
 }
 
 async function findMagnet(title: string, romaji: string, epNum: number) {
-  const paddedEp = epNum.toString().padStart(2, '0');
-  // Deduplicated title variants
   const titles = [...new Set([title, romaji].filter(Boolean))];
   const groups = ['SubsPlease', 'Erai-raws'];
   const log: string[] = [];
 
+  // Strategy 1: group + title + episode variants
   for (const t of titles) {
     for (const group of groups) {
-      const query = `${group} ${t} ${paddedEp}`;
-      try {
-        const { xml, status } = await searchNyaa(query);
-        log.push(`[${status}] "${query}" → ${xml ? parseNyaaRSS(xml).length : 0} results`);
-        if (xml) {
+      // Try with 2-digit and 4-digit padding (covers both short and long-running shows)
+      const epVariants = [
+        epNum.toString().padStart(2, '0'),   // 01  — seasonal anime
+        epNum.toString().padStart(4, '0'),   // 0001 — long-running (One Piece, Naruto etc)
+      ];
+      for (const epStr of epVariants) {
+        const query = `${group} ${t} ${epStr}`;
+        try {
+          const { xml, status } = await searchNyaa(query);
           const results = parseNyaaRSS(xml);
-          const match = pickBest(results, paddedEp, epNum);
+          log.push(`[${status}] "${query}" → ${results.length} results`);
+          const match = pickBest(results, epNum);
           if (match) return { magnet: match, log };
+        } catch (e: any) {
+          log.push(`[ERR] "${query}" → ${e.message}`);
         }
-      } catch (e: any) {
-        log.push(`[ERR] "${query}" → ${e.message}`);
       }
     }
   }
 
-  // Broader fallback
+  // Strategy 2: title only + episode variants (no group prefix)
   for (const t of titles) {
-    const query = `${t} ${paddedEp}`;
-    try {
-      const { xml, status } = await searchNyaa(query);
-      log.push(`[${status}] "${query}" → ${xml ? parseNyaaRSS(xml).length : 0} results`);
-      if (xml) {
+    const epVariants = [
+      epNum.toString().padStart(2, '0'),
+      epNum.toString().padStart(4, '0'),
+      epNum.toString(),
+    ];
+    for (const epStr of epVariants) {
+      const query = `${t} ${epStr}`;
+      try {
+        const { xml, status } = await searchNyaa(query);
         const results = parseNyaaRSS(xml);
-        const match = pickBest(results, paddedEp, epNum);
+        log.push(`[${status}] "${query}" → ${results.length} results`);
+        const match = pickBest(results, epNum);
         if (match) return { magnet: match, log };
+      } catch (e: any) {
+        log.push(`[ERR] "${query}" → ${e.message}`);
       }
-    } catch (e: any) {
-      log.push(`[ERR] "${query}" → ${e.message}`);
     }
   }
 
@@ -140,7 +151,6 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     magnet,
     seadex,
-    // Only expose debug log when requested
     ...(debug ? { log } : {}),
   });
 }
