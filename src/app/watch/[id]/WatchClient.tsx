@@ -3,9 +3,11 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import SafeTorrentPlayer from '@/components/SafeTorrentPlayer';
+import Player from '@/components/Player';
 import {
   Calendar, Tv, Star, Download, AlertTriangle,
-  Loader2, ChevronLeft, ChevronRight, Magnet, ExternalLink
+  Loader2, ChevronLeft, ChevronRight, Magnet, ExternalLink,
+  Zap, Monitor
 } from 'lucide-react';
 
 interface SeaDexResult {
@@ -31,22 +33,78 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
   const [result, setResult] = useState<SeaDexResult | null>(null);
   const [searching, setSearching] = useState(true);
   const [searchFailed, setSearchFailed] = useState(false);
+  const [mode, setMode] = useState<'torrent' | 'streaming'>('torrent');
+  const [streamUrl, setStreamUrl] = useState<string>('');
+  const [fetchingStream, setFetchingStream] = useState(false);
+
+  useEffect(() => {
+    const handleSwitch = () => setMode('streaming');
+    window.addEventListener('switch-to-streaming', handleSwitch);
+    return () => window.removeEventListener('switch-to-streaming', handleSwitch);
+  }, []);
 
   const episodeList = Array.from({ length: totalEpisodes }, (_, i) => i + 1);
   const prevEp = currentEpNum > 1 ? currentEpNum - 1 : null;
   const nextEp = currentEpNum < totalEpisodes ? currentEpNum + 1 : null;
 
+  // Fetch Torrent
   useEffect(() => {
     setSearching(true);
     setSearchFailed(false);
     setResult(null);
 
+    const title = anime.title.english || anime.title.romaji;
+    const romajiTitle = anime.title.romaji;
+
     fetch(`/api/torrent?anilistId=${animeId}&title=${encodeURIComponent(title)}&romaji=${encodeURIComponent(romajiTitle)}&ep=${currentEpNum}`)
       .then(r => r.json())
-      .then(data => setResult(data))
-      .catch(() => setSearchFailed(true))
+      .then(data => {
+        setResult(data);
+        if (!data.magnet) {
+          setMode('streaming'); // Auto fallback
+        }
+      })
+      .catch(() => {
+        setSearchFailed(true);
+        setMode('streaming'); // Auto fallback
+      })
       .finally(() => setSearching(false));
-  }, [animeId, currentEpNum]);
+  }, [animeId, currentEpNum, anime.title.english, anime.title.romaji]);
+
+  // Fetch Streaming Links (if mode is streaming or torrent failed)
+  useEffect(() => {
+    if (mode === 'streaming') {
+      setFetchingStream(true);
+      const title = anime.title.english || anime.title.romaji;
+      
+      // 1. Get episodes from Consumet (via our lib/consumet fetchEpisodes logic)
+      // Since fetchEpisodes is server-side/lib, we need to handle the flow.
+      // Easiest way: Enhance the watch API or search here.
+      // For now, let's assume we need an API endpoint to fetch the stream for a title + ep
+      // Looking at src/app/api/watch/[episodeId]/route.ts, it expects a Consumet episodeId.
+      
+      // We need a way to map Title + Ep -> Consumet Episode ID on the client.
+      // Let's create a new search helper or use an existing one.
+      
+      const fetchStreaming = async () => {
+        try {
+          const res = await fetch(`/api/watch?title=${encodeURIComponent(title)}&ep=${currentEpNum}`);
+          const data = await res.json();
+          if (data.sources && data.sources.length > 0) {
+            // Prefer 'auto' or '1080p' or just the first one
+            const source = data.sources.find((s: any) => s.quality === 'auto' || s.quality === '1080p') || data.sources[0];
+            setStreamUrl(source.url);
+          }
+        } catch (error) {
+          console.error('Streaming fetch error:', error);
+        } finally {
+          setFetchingStream(false);
+        }
+      };
+
+      fetchStreaming();
+    }
+  }, [mode, currentEpNum, anime.title.english, anime.title.romaji]);
 
   const magnet = result?.magnet || '';
 
@@ -56,16 +114,51 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
 
         {/* LEFT: Player */}
         <div className="flex-1 min-w-0">
-          <div className="w-full bg-black">
-            {searching ? (
-              <div className="aspect-video flex flex-col items-center justify-center gap-3 bg-[#0d0d0d]">
-                <Loader2 className="text-primary animate-spin" size={44} />
-                <p className="text-gray-500 text-xs font-bold tracking-[0.2em] uppercase">
-                  Fetching from SeaDex...
-                </p>
-              </div>
+          <div className="w-full bg-black relative">
+            {/* Mode Toggle Overlay */}
+            <div className="absolute top-4 right-4 z-50 flex bg-black/60 backdrop-blur-md p-1 rounded-xl border border-white/10">
+              <button
+                onClick={() => setMode('torrent')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-black transition-all ${
+                  mode === 'torrent' ? 'bg-primary text-black' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <Zap size={14} fill={mode === 'torrent' ? 'black' : 'none'} /> HIGH QUALITY
+              </button>
+              <button
+                onClick={() => setMode('streaming')}
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-black transition-all ${
+                  mode === 'streaming' ? 'bg-primary text-black' : 'text-gray-400 hover:text-white'
+                }`}
+              >
+                <Monitor size={14} /> STANDARD
+              </button>
+            </div>
+
+            {mode === 'torrent' ? (
+              searching ? (
+                <div className="aspect-video flex flex-col items-center justify-center gap-3 bg-[#0d0d0d]">
+                  <Loader2 className="text-primary animate-spin" size={44} />
+                  <p className="text-gray-500 text-xs font-bold tracking-[0.2em] uppercase">
+                    Searching Torrents...
+                  </p>
+                </div>
+              ) : (
+                <SafeTorrentPlayer magnet={magnet} />
+              )
             ) : (
-              <SafeTorrentPlayer magnet={magnet} />
+              <div className="aspect-video">
+                {fetchingStream ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-3 bg-[#0d0d0d]">
+                    <Loader2 className="text-primary animate-spin" size={44} />
+                    <p className="text-gray-500 text-xs font-bold tracking-[0.2em] uppercase">
+                      Loading Stream...
+                    </p>
+                  </div>
+                ) : (
+                  <Player url={streamUrl} />
+                )}
+              </div>
             )}
           </div>
 

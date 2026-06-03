@@ -106,21 +106,23 @@ export default function TorrentPlayer({ magnet }: TorrentPlayerProps) {
       <div className="aspect-video bg-[#0d0d0d] rounded-xl flex flex-col items-center justify-center p-8 text-center border border-white/5">
         <AlertTriangle className="text-yellow-500 mb-4" size={40} />
         <h2 className="text-lg font-bold text-white mb-2">Can't Play in Browser</h2>
-        <p className="text-gray-400 max-w-md text-sm leading-relaxed mb-6">{error}</p>
+        <p className="text-gray-400 max-w-md text-sm leading-relaxed mb-6">
+          {error?.includes('peers') 
+            ? "No active seeders found for this torrent. It might be too old or obscure for browser streaming."
+            : error}
+        </p>
         <div className="flex flex-col sm:flex-row gap-3">
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('switch-to-streaming'))}
+            className="flex items-center justify-center gap-2 bg-primary text-black font-bold px-6 py-2.5 rounded-xl hover:scale-105 transition-all text-sm"
+          >
+            <Wifi size={16} /> Switch to Standard Stream
+          </button>
           <a
             href={magnet}
-            className="flex items-center gap-2 bg-primary text-black font-bold px-5 py-2.5 rounded-xl hover:scale-105 transition-all text-sm"
+            className="flex items-center justify-center gap-2 bg-white/10 text-white font-bold px-6 py-2.5 rounded-xl hover:bg-white/20 transition-all text-sm border border-white/10"
           >
-            <ExternalLink size={16} /> Open in Torrent Client
-          </a>
-          <a
-            href={`https://www.stremio.com/`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 bg-white/10 text-white font-bold px-5 py-2.5 rounded-xl hover:bg-white/20 transition-all text-sm border border-white/10"
-          >
-            <Wifi size={16} /> Get Stremio
+            <ExternalLink size={16} /> Open Magnet Link
           </a>
         </div>
       </div>

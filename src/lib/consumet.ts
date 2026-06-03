@@ -1,66 +1,36 @@
 import { ANIME } from '@consumet/extensions';
 
-const hianime = new ANIME.Hianime();
-const animepahe = new ANIME.AnimePahe();
+const gogoanime = new ANIME.Gogoanime();
 
 export async function fetchEpisodes(animeTitle: string) {
   try {
-    // Try Zoro/Hianime first
-    let results = await hianime.search(animeTitle);
+    const results = await gogoanime.search(animeTitle);
     if (results.results.length > 0) {
-      const anime = results.results[0];
-      const info = await hianime.fetchAnimeInfo(anime.id);
-      // Tag episodes with provider so fetchStreamLinks knows which to use
+      // Find the best title match
+      const anime = results.results.find((r: any) => 
+        r.title.toLowerCase() === animeTitle.toLowerCase()
+      ) || results.results[0];
+      
+      const info = await gogoanime.fetchAnimeInfo(anime.id);
       if (info?.episodes) {
-        info.episodes = info.episodes.map((ep: any) => ({ ...ep, provider: 'zoro' }));
+        info.episodes = info.episodes.map((ep: any) => ({ ...ep, provider: 'gogoanime' }));
       }
       return info;
     }
-
-    // Fallback to AnimePahe
-    results = await animepahe.search(animeTitle);
-    if (results.results.length > 0) {
-      const anime = results.results[0];
-      const info = await animepahe.fetchAnimeInfo(anime.id);
-      if (info?.episodes) {
-        info.episodes = info.episodes.map((ep: any) => ({ ...ep, provider: 'animepahe' }));
-      }
-      return info;
-    }
-
     return null;
   } catch (error) {
-    console.error('Error fetching episodes:', error);
+    console.error('Error fetching episodes from Gogoanime:', error);
     return null;
   }
 }
 
 export async function fetchStreamLinks(episodeId: string, provider?: string) {
   try {
-    if (provider === 'animepahe') {
-      const links = await animepahe.fetchEpisodeSources(episodeId);
-      if (links?.sources?.length > 0) return links;
-    }
-
-    // Default: try Zoro first
-    try {
-      const links = await hianime.fetchEpisodeSources(episodeId);
-      if (links?.sources?.length > 0) return links;
-    } catch {
-      // fall through
-    }
-
-    // Final fallback: AnimePahe
-    try {
-      const links = await animepahe.fetchEpisodeSources(episodeId);
-      if (links?.sources?.length > 0) return links;
-    } catch {
-      // fall through
-    }
-
+    const links = await gogoanime.fetchEpisodeSources(episodeId);
+    if (links?.sources?.length > 0) return links;
     return null;
   } catch (error) {
-    console.error('Error fetching stream links:', error);
+    console.error('Error fetching stream links from Gogoanime:', error);
     return null;
   }
 }
