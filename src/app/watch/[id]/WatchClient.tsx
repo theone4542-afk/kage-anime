@@ -5,13 +5,19 @@ import Link from 'next/link';
 import SafeTorrentPlayer from '@/components/SafeTorrentPlayer';
 import {
   Calendar, Tv, Star, Download, AlertTriangle,
-  Loader2, ChevronLeft, ChevronRight, Magnet
+  Loader2, ChevronLeft, ChevronRight, Magnet, ExternalLink
 } from 'lucide-react';
 
-interface SeaDexInfo {
-  bestRelease: string;
-  altRelease: string;
+interface SeaDexResult {
+  magnet: string;
+  releaseGroup: string;
+  isBest: boolean;
   notes: string;
+  theoreticalBest: string;
+  tracker: string;
+  url: string;
+  groupedUrl: string;
+  error?: string;
 }
 
 interface WatchClientProps {
@@ -22,13 +28,10 @@ interface WatchClientProps {
 }
 
 export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNum }: WatchClientProps) {
-  const [magnet, setMagnet] = useState('');
-  const [seadex, setSeadex] = useState<SeaDexInfo | null>(null);
+  const [result, setResult] = useState<SeaDexResult | null>(null);
   const [searching, setSearching] = useState(true);
   const [searchFailed, setSearchFailed] = useState(false);
 
-  const title = anime.title.english || anime.title.romaji;
-  const romajiTitle = anime.title.romaji || '';
   const episodeList = Array.from({ length: totalEpisodes }, (_, i) => i + 1);
   const prevEp = currentEpNum > 1 ? currentEpNum - 1 : null;
   const nextEp = currentEpNum < totalEpisodes ? currentEpNum + 1 : null;
@@ -36,26 +39,16 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
   useEffect(() => {
     setSearching(true);
     setSearchFailed(false);
-    setMagnet('');
-    setSeadex(null);
+    setResult(null);
 
-    // Call our own edge API route — runs on Cloudflare, not blocked by Nyaa
-    const params = new URLSearchParams({
-      title,
-      romaji: romajiTitle,
-      ep: String(currentEpNum),
-    });
-
-    fetch(`/api/torrent?${params}`)
+    fetch(`/api/torrent?anilistId=${animeId}&ep=${currentEpNum}`)
       .then(r => r.json())
-      .then(data => {
-        if (data.error) { setSearchFailed(true); return; }
-        setMagnet(data.magnet || '');
-        setSeadex(data.seadex || null);
-      })
+      .then(data => setResult(data))
       .catch(() => setSearchFailed(true))
       .finally(() => setSearching(false));
-  }, [title, romajiTitle, currentEpNum]);
+  }, [animeId, currentEpNum]);
+
+  const magnet = result?.magnet || '';
 
   return (
     <main className="min-h-screen bg-[#0b0b0b] pt-16">
@@ -67,7 +60,9 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
             {searching ? (
               <div className="aspect-video flex flex-col items-center justify-center gap-3 bg-[#0d0d0d]">
                 <Loader2 className="text-primary animate-spin" size={44} />
-                <p className="text-gray-500 text-xs font-bold tracking-[0.2em] uppercase">Searching Nyaa...</p>
+                <p className="text-gray-500 text-xs font-bold tracking-[0.2em] uppercase">
+                  Fetching from SeaDex...
+                </p>
               </div>
             ) : (
               <SafeTorrentPlayer magnet={magnet} />
@@ -76,7 +71,6 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
 
           {/* Info below player */}
           <div className="p-4 md:p-6 border-b border-white/5">
-
             <div className="flex items-start justify-between gap-4 mb-3">
               <div>
                 <h1 className="text-lg md:text-2xl font-black text-white leading-tight">
@@ -118,34 +112,53 @@ export default function WatchClient({ animeId, anime, totalEpisodes, currentEpNu
               )}
             </div>
 
-            {/* Source status */}
+            {/* SeaDex result status */}
             {!searching && (
-              <div className={`inline-flex items-center gap-2 text-[11px] font-bold px-3 py-1.5 rounded-lg border mb-4 ${
-                magnet
-                  ? 'bg-green-500/10 text-green-400 border-green-500/20'
-                  : searchFailed
-                  ? 'bg-red-500/10 text-red-400 border-red-500/20'
-                  : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
-              }`}>
-                {magnet
-                  ? <><Download size={12} /> CR WEB-DL · SubsPlease / Erai-raws</>
-                  : searchFailed
-                  ? <><AlertTriangle size={12} /> Search failed — try reloading</>
-                  : <><AlertTriangle size={12} /> No torrent found for this episode</>
-                }
-              </div>
-            )}
-
-            {/* SeaDex */}
-            {seadex?.bestRelease && (
-              <div className="bg-white/3 border border-white/5 rounded-xl p-4 mb-4">
-                <p className="text-[10px] font-black text-primary uppercase tracking-widest mb-1">SeaDex Recommendation</p>
-                <p className="text-white text-sm font-semibold">{seadex.bestRelease}</p>
-                {seadex.altRelease && <p className="text-gray-500 text-xs mt-0.5">Alt: {seadex.altRelease}</p>}
-                {seadex.notes && (
-                  <p className="text-gray-500 text-xs mt-2 italic border-t border-white/5 pt-2">"{seadex.notes}"</p>
+              <>
+                {searchFailed || result?.error ? (
+                  <div className="inline-flex items-center gap-2 text-[11px] font-bold px-3 py-1.5 rounded-lg border mb-4 bg-red-500/10 text-red-400 border-red-500/20">
+                    <AlertTriangle size={12} /> No SeaDex entry found for this anime
+                  </div>
+                ) : magnet ? (
+                  <div className="bg-primary/5 border border-primary/15 rounded-xl p-4 mb-4">
+                    <div className="flex items-center justify-between flex-wrap gap-2 mb-1">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1.5 text-[11px] font-black text-green-400 bg-green-500/10 border border-green-500/20 px-2.5 py-1 rounded-lg">
+                          <Download size={11} /> {result?.isBest ? 'BEST PRINT' : 'SEADEX'}
+                        </span>
+                        <span className="text-white text-sm font-bold">{result?.releaseGroup}</span>
+                      </div>
+                      {result?.url && (
+                        <a
+                          href={result.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[11px] text-gray-500 hover:text-primary transition-colors flex items-center gap-1"
+                        >
+                          <ExternalLink size={11} /> {result.tracker}
+                        </a>
+                      )}
+                    </div>
+                    {result?.notes && (
+                      <p className="text-gray-500 text-xs italic mt-2 border-t border-white/5 pt-2">
+                        "{result.notes}"
+                      </p>
+                    )}
+                    {result?.theoreticalBest && (
+                      <p className="text-gray-600 text-xs mt-1">
+                        Theoretical best: {result.theoreticalBest}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="inline-flex items-center gap-2 text-[11px] font-bold px-3 py-1.5 rounded-lg border mb-4 bg-yellow-500/10 text-yellow-400 border-yellow-500/20">
+                    <AlertTriangle size={12} />
+                    {result?.releaseGroup
+                      ? `Best print is "${result.releaseGroup}" but it's on a private tracker`
+                      : 'No public torrent available for this episode'}
+                  </div>
                 )}
-              </div>
+              </>
             )}
 
             {/* Prev / Next */}

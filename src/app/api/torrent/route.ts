@@ -2,155 +2,165 @@ export const runtime = 'edge';
 
 import { NextRequest, NextResponse } from 'next/server';
 
-function parseNyaaRSS(xml: string) {
-  const items = xml.match(/<item>[\s\S]*?<\/item>/g) || [];
-  return items.map(item => {
-    const title =
-      item.match(/<title><!\[CDATA\[([\s\S]*?)\]\]><\/title>/)?.[1] ||
-      item.match(/<title>([\s\S]*?)<\/title>/)?.[1] || '';
-    const magnet =
-      item.match(/<nyaa:magnetUri><!\[CDATA\[([\s\S]*?)\]\]><\/nyaa:magnetUri>/)?.[1] ||
-      item.match(/<nyaa:magnetUri>([\s\S]*?)<\/nyaa:magnetUri>/)?.[1] || '';
-    const seeders = parseInt(item.match(/<nyaa:seeders>(\d+)<\/nyaa:seeders>/)?.[1] || '0');
-    return { title, magnet, seeders };
-  }).filter(r => r.magnet);
+interface TorrentRecord {
+  infoHash: string | null;
+  isBest: boolean;
+  releaseGroup: string;
+  tracker: string;
+  url: string;
+  groupedUrl: string;
+  dualAudio: boolean;
+  files: { name: string; length: number }[];
+  tags: string[];
 }
 
-function matchesEpisode(title: string, epNum: number): boolean {
-  // Build all possible episode number formats:
-  // 01, 001, 0001, 1 — SubsPlease uses variable padding
-  const variants = [
-    epNum.toString(),                          // 1
-    epNum.toString().padStart(2, '0'),         // 01
-    epNum.toString().padStart(3, '0'),         // 001
-    epNum.toString().padStart(4, '0'),         // 0001
+interface SeaDexEntry {
+  alID: number;
+  notes: string;
+  incomplete: boolean;
+  theoreticalBest: string;
+  comparison: string;
+  expand: { trs: TorrentRecord[] };
+}
+
+// Build a magnet link from an infohash and file names
+function buildMagnet(infoHash: string, files: { name: string }[], releaseGroup: string): string {
+  const trackers = [
+    'udp://open.demonii.com:1337/announce',
+    'udp://tracker.openbittorrent.com:80',
+    'udp://tracker.coppersurfer.tk:6969',
+    'udp://glotorrents.pw:6969/announce',
+    'udp://tracker.opentrackr.org:1337/announce',
+    'udp://torrent.gresille.org:80/announce',
+    'udp://p4p.arenabg.com:1337',
+    'udp://tracker.leechers-paradise.org:6969',
   ];
 
-  return variants.some(v =>
-    title.includes(`- ${v} `) ||
-    title.includes(`- ${v}(`) ||   // "- 01(720p)"
-    title.endsWith(`- ${v}`) ||
-    title.includes(`[${v}]`) ||
-    title.includes(` ${v} `) ||
-    title.endsWith(` ${v}`) ||
-    title.includes(`E${v}`)
-  );
+  const dn = encodeURIComponent(files[0]?.name || releaseGroup);
+  const tr = trackers.map(t => `&tr=${encodeURIComponent(t)}`).join('');
+  return `magnet:?xt=urn:btih:${infoHash}&dn=${dn}${tr}`;
 }
 
-function pickBest(results: { title: string; magnet: string; seeders: number }[], epNum: number) {
-  const matches = results.filter(r => matchesEpisode(r.title, epNum));
-  const pool = matches.length > 0 ? matches : results;
-  pool.sort((a, b) => b.seeders - a.seeders);
-  return pool[0]?.magnet || '';
-}
+// Check if a torrent's files contain a specific episode
+function torrentHasEpisode(files: { name: string }[], epNum: number): boolean {
+  if (files.length === 0) return false;
 
-async function searchNyaa(query: string) {
-  const url = `https://nyaa.si/?page=rss&q=${encodeURIComponent(query)}&c=1_2&f=0`;
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept': 'application/xml, text/xml, */*',
-    },
+  // If it's a single-file torrent (one episode), always match
+  if (files.length === 1) return true;
+
+  const padded2 = epNum.toString().padStart(2, '0');
+  const padded3 = epNum.toString().padStart(3, '0');
+  const padded4 = epNum.toString().padStart(4, '0');
+
+  return files.some(f => {
+    const name = f.name;
+    return (
+      name.includes(`- ${padded2}`) ||
+      name.includes(`- ${padded3}`) ||
+      name.includes(`- ${padded4}`) ||
+      name.includes(`- ${epNum} `) ||
+      name.includes(`[${padded2}]`) ||
+      name.includes(`[${padded3}]`) ||
+      name.includes(`[${padded4}]`) ||
+      new RegExp(`E${padded2}[^0-9]`).test(name) ||
+      new RegExp(`E${padded3}[^0-9]`).test(name)
+    );
   });
-  const text = res.ok ? await res.text() : '';
-  return { xml: text, status: res.status };
 }
 
-async function findMagnet(title: string, romaji: string, epNum: number) {
-  const titles = [...new Set([title, romaji].filter(Boolean))];
-  const groups = ['SubsPlease', 'Erai-raws'];
-  const log: string[] = [];
+async function fetchSeaDexByAnilistId(anilistId: number, epNum: number) {
+  const url = `https://releases.moe/api/collections/entries/records?filter=alID=${anilistId}&expand=trs&perPage=1`;
 
-  // Strategy 1: group + title + episode variants
-  for (const t of titles) {
-    for (const group of groups) {
-      // Try with 2-digit and 4-digit padding (covers both short and long-running shows)
-      const epVariants = [
-        epNum.toString().padStart(2, '0'),   // 01  — seasonal anime
-        epNum.toString().padStart(4, '0'),   // 0001 — long-running (One Piece, Naruto etc)
-      ];
-      for (const epStr of epVariants) {
-        const query = `${group} ${t} ${epStr}`;
-        try {
-          const { xml, status } = await searchNyaa(query);
-          const results = parseNyaaRSS(xml);
-          log.push(`[${status}] "${query}" → ${results.length} results`);
-          const match = pickBest(results, epNum);
-          if (match) return { magnet: match, log };
-        } catch (e: any) {
-          log.push(`[ERR] "${query}" → ${e.message}`);
-        }
-      }
-    }
-  }
+  const res = await fetch(url, {
+    headers: { 'Accept': 'application/json' },
+  });
 
-  // Strategy 2: title only + episode variants (no group prefix)
-  for (const t of titles) {
-    const epVariants = [
-      epNum.toString().padStart(2, '0'),
-      epNum.toString().padStart(4, '0'),
-      epNum.toString(),
-    ];
-    for (const epStr of epVariants) {
-      const query = `${t} ${epStr}`;
-      try {
-        const { xml, status } = await searchNyaa(query);
-        const results = parseNyaaRSS(xml);
-        log.push(`[${status}] "${query}" → ${results.length} results`);
-        const match = pickBest(results, epNum);
-        if (match) return { magnet: match, log };
-      } catch (e: any) {
-        log.push(`[ERR] "${query}" → ${e.message}`);
-      }
-    }
-  }
+  if (!res.ok) return null;
+  const data = await res.json();
+  const entry: SeaDexEntry = data?.items?.[0];
+  if (!entry) return null;
 
-  return { magnet: '', log };
-}
+  const trs: TorrentRecord[] = entry.expand?.trs || [];
 
-async function fetchSeaDex(title: string) {
-  try {
-    const url = `https://releases.moe/api/collections/entries/records?filter=title~"${encodeURIComponent(title)}"&perPage=5&expand=trs`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const items = data?.items;
-    if (!items?.length) return null;
-    const match = items.find((item: any) => {
-      const t = (item.title || '').toLowerCase();
-      const s = title.toLowerCase();
-      return t.includes(s) || s.includes(t);
-    }) || items[0];
-    const trs: any[] = match.expand?.trs || [];
-    const bestTrs = trs.filter((t: any) => t.isBest);
-    const altTrs = trs.filter((t: any) => !t.isBest);
+  // Only use public tracker torrents (infohash available, not private)
+  const publicTorrents = trs.filter(t =>
+    t.infoHash &&
+    t.infoHash !== '<redacted>' &&
+    (t.tracker === 'nyaa' || t.tracker === 'animetosho' || !t.tracker.includes('private'))
+  );
+
+  // First try: best torrents that contain this episode
+  const bestWithEp = publicTorrents.filter(t => t.isBest && torrentHasEpisode(t.files, epNum));
+  if (bestWithEp.length > 0) {
+    const t = bestWithEp[0];
     return {
-      bestRelease: bestTrs.map((t: any) => t.releaseGroup).filter(Boolean).join(', ') || match.bestRelease || '',
-      altRelease: altTrs.map((t: any) => t.releaseGroup).filter(Boolean).join(', ') || match.altRelease || '',
-      notes: match.notes || '',
+      magnet: buildMagnet(t.infoHash!, t.files, t.releaseGroup),
+      releaseGroup: t.releaseGroup,
+      isBest: true,
+      notes: entry.notes,
+      theoreticalBest: entry.theoreticalBest,
+      tracker: t.tracker,
+      url: t.url,
+      groupedUrl: t.groupedUrl,
     };
-  } catch {
-    return null;
   }
+
+  // Second try: any public torrent with this episode
+  const anyWithEp = publicTorrents.filter(t => torrentHasEpisode(t.files, epNum));
+  if (anyWithEp.length > 0) {
+    const t = anyWithEp[0];
+    return {
+      magnet: buildMagnet(t.infoHash!, t.files, t.releaseGroup),
+      releaseGroup: t.releaseGroup,
+      isBest: t.isBest,
+      notes: entry.notes,
+      theoreticalBest: entry.theoreticalBest,
+      tracker: t.tracker,
+      url: t.url,
+      groupedUrl: t.groupedUrl,
+    };
+  }
+
+  // Third try: best torrent regardless of episode (season pack or batch)
+  const bestAny = publicTorrents.filter(t => t.isBest);
+  if (bestAny.length > 0) {
+    const t = bestAny[0];
+    return {
+      magnet: buildMagnet(t.infoHash!, t.files, t.releaseGroup),
+      releaseGroup: t.releaseGroup,
+      isBest: true,
+      notes: entry.notes,
+      theoreticalBest: entry.theoreticalBest,
+      tracker: t.tracker,
+      url: t.url,
+      groupedUrl: t.groupedUrl,
+    };
+  }
+
+  // Return metadata even if no playable torrent found
+  return {
+    magnet: '',
+    releaseGroup: trs[0]?.releaseGroup || '',
+    isBest: false,
+    notes: entry.notes,
+    theoreticalBest: entry.theoreticalBest,
+    tracker: trs[0]?.tracker || '',
+    url: trs[0]?.url || '',
+    groupedUrl: trs[0]?.groupedUrl || '',
+  };
 }
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const title = searchParams.get('title') || '';
-  const romaji = searchParams.get('romaji') || '';
+  const anilistId = parseInt(searchParams.get('anilistId') || '0');
   const ep = parseInt(searchParams.get('ep') || '1');
-  const debug = searchParams.get('debug') === '1';
 
-  if (!title) return NextResponse.json({ error: 'Missing title' }, { status: 400 });
+  if (!anilistId) return NextResponse.json({ error: 'Missing anilistId' }, { status: 400 });
 
-  const [{ magnet, log }, seadex] = await Promise.all([
-    findMagnet(title, romaji, ep),
-    fetchSeaDex(title),
-  ]);
-
-  return NextResponse.json({
-    magnet,
-    seadex,
-    ...(debug ? { log } : {}),
-  });
+  try {
+    const result = await fetchSeaDexByAnilistId(anilistId, ep);
+    return NextResponse.json(result || { magnet: '', error: 'No SeaDex entry found' });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || 'Failed' }, { status: 500 });
+  }
 }
